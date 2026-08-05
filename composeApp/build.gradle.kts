@@ -373,7 +373,7 @@ tasks.named("compileAndroidMain").configure {
 }
 
 val calVer: String = ZonedDateTime.now(ZoneOffset.UTC)
-    .format(DateTimeFormatter.ofPattern("yy.MM.dd"))
+        .format(DateTimeFormatter.ofPattern("yy.MM.dd"))
 val composePackageName = "SchildiChatRevenge"
 val linuxPackageName = "schildichat-revenge"
 val linuxXWaylandDesktopId = "chat-schildi-revenge-MainKt"
@@ -401,7 +401,7 @@ compose.desktop {
             targetFormats(
                 TargetFormat.Exe,
                 TargetFormat.Msi,
-                // TargetFormat.Dmg, // Needs Apple volunteers
+                TargetFormat.Dmg,
             )
             packageName = nativePackageName
             packageVersion = calVer
@@ -439,6 +439,38 @@ compose.desktop {
 
                 debMaintainer = "SpiritCroc <shire@spiritcroc.de>"
                 rpmLicenseType = "AGPL-3.0-only"
+            }
+
+            macOS {
+                bundleID = "chat.schildi.revenge"
+                appCategory = "public.app-category.social-networking"
+                iconFile.set(rootProject.file("graphics/ic_launcher.icns"))
+
+                infoPlist {
+                    extraKeysRawXml = """
+                        <key>CFBundleURLTypes</key>
+                        <array>
+                            <dict>
+                                <key>CFBundleURLName</key>
+                                <string>Matrix URI</string>
+                                <key>CFBundleURLSchemes</key>
+                                <array>
+                                    <string>matrix</string>
+                                </array>
+                            </dict>
+                            <dict>
+                                <key>CFBundleURLName</key>
+                                <string>SchildiChat Legacy URI</string>
+                                <key>CFBundleURLSchemes</key>
+                                <array>
+                                    <string>schildichat</string>
+                                </array>
+                            </dict>
+                        </array>
+                        <key>NSLocalNetworkUsageDescription</key>
+                        <string>SchildiChat Revenge connects to Matrix homeservers on your local network.</string>
+                    """.trimIndent()
+                }
             }
         }
     }
