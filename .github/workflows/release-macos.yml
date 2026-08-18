@@ -58,7 +58,7 @@ jobs:
           /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist" | grep -Fx 'chat.schildi.revenge'
           /usr/libexec/PlistBuddy -c 'Print :CFBundleURLTypes:0:CFBundleURLSchemes:0' "$app/Contents/Info.plist" | grep -Fx matrix
           /usr/libexec/PlistBuddy -c 'Print :CFBundleURLTypes:1:CFBundleURLSchemes:0' "$app/Contents/Info.plist" | grep -Fx schildichat
-          lipo -archs "$app/Contents/app/resources/libmatrix_sdk_ffi.dylib" | grep -Fx arm64
+          ./scripts/check-macos-dylib.sh "$app"
 
       - uses: actions/upload-artifact@v4
         with:

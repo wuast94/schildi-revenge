@@ -1,5 +1,10 @@
 set quiet
 
+# Build the macOS DMG and verify the bundled Rust dynamic library.
+checkdylib:
+    ./gradlew :composeApp:packageReleaseDmg
+    ./scripts/check-macos-dylib.sh composeApp/build/compose/binaries/main-release/app/SchildiChatRevenge.app
+
 # Build the macOS DMG and verify its declared minimum system version against every bundled Mach-O binary.
 checkminversion:
     #!/usr/bin/env bash

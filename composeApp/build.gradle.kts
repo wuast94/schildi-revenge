@@ -1,4 +1,5 @@
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
+import org.jetbrains.compose.desktop.application.tasks.AbstractJPackageTask
 import org.gradle.api.DefaultTask
 import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.file.FileSystemOperations
@@ -386,6 +387,9 @@ val nativePackageName = if (org.gradle.internal.os.OperatingSystem.current().isL
 compose.desktop {
     application {
         mainClass = "chat.schildi.revenge.MainKt"
+        if (org.gradle.internal.os.OperatingSystem.current().isMacOsX) {
+            jvmArgs("--enable-native-access=ALL-UNNAMED")
+        }
 
         // ProGuard is broken, today can we fix?
         buildTypes {
@@ -514,8 +518,39 @@ val copyNativeLib = tasks.register<Sync>("copyNativeLibToDistribution") {
     dependsOn(":matrixRustBindings:buildDesktopSdk")
 }
 
-tasks.matching {
-    it.name == "prepareAppResources"
-}.configureEach {
-    dependsOn(copyNativeLib)
+if (org.gradle.internal.os.OperatingSystem.current().isMacOsX) {
+    val macosFrameworksDir = layout.buildDirectory.dir("macos-app-content/Frameworks")
+    val removeLegacyMacosResourceDylib = tasks.register<Delete>("removeLegacyMacosResourceDylib") {
+        delete(distributionResourcesOsDir.map { resourcesDir -> resourcesDir.file(ffiLibName) })
+    }
+    val prepareMacosFrameworks = tasks.register<Sync>("prepareMacosFrameworks") {
+        description = "Stage the native matrix-sdk-ffi library for the macOS app bundle"
+        group = "distribution"
+        from(rustSdkDir.resolve("target/${rustProfile}/${ffiLibName}"))
+        into(macosFrameworksDir)
+        dependsOn(":matrixRustBindings:buildDesktopSdk")
+    }
+
+    tasks.matching { it.name == "prepareAppResources" }.configureEach {
+        dependsOn(removeLegacyMacosResourceDylib)
+    }
+
+    tasks.withType<AbstractJPackageTask>().configureEach {
+        if (targetFormat == TargetFormat.AppImage) {
+            dependsOn(prepareMacosFrameworks)
+            inputs.dir(macosFrameworksDir)
+            inputs.property("macosNativeLibraryBundleLocation", "Contents/Frameworks")
+            freeArgs.addAll(
+                macosFrameworksDir.map { frameworksDir ->
+                    listOf("--app-content", frameworksDir.asFile.absolutePath)
+                }
+            )
+        }
+    }
+} else {
+    tasks.matching {
+        it.name == "prepareAppResources"
+    }.configureEach {
+        dependsOn(copyNativeLib)
+    }
 }
