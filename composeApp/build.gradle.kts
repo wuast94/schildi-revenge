@@ -444,6 +444,7 @@ compose.desktop {
             macOS {
                 bundleID = "chat.schildi.revenge"
                 appCategory = "public.app-category.social-networking"
+                minimumSystemVersion = "11.0"
                 iconFile.set(rootProject.file("graphics/ic_launcher.icns"))
 
                 infoPlist {
