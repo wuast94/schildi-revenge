@@ -1,0 +1,67 @@
+---
+name: Build macOS
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/release-macos.yml"
+      - "composeApp/**"
+      - "matrix/**"
+      - "matrixRustBindings/**"
+      - "matrix-rust-sdk"
+      - "res/**"
+      - "graphics/**"
+      - "buildSrc/**"
+      - "gradle/**"
+      - "*.gradle.kts"
+      - "gradle.properties"
+      - "gradlew"
+      - "gradlew.bat"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: jetbrains
+          java-version: "25"
+          architecture: aarch64
+          cache: gradle
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - name: Build release DMG
+        run: ./gradlew :composeApp:packageReleaseDmg
+
+      - name: Verify DMG contents
+        shell: bash
+        run: |
+          set -euo pipefail
+          dmg=$(find composeApp/build/compose/binaries/main-release/dmg -maxdepth 1 -name '*.dmg' -print -quit)
+          test -n "$dmg"
+          mount_dir=$(mktemp -d)
+          trap 'hdiutil detach "$mount_dir" -quiet || true; rmdir "$mount_dir" || true' EXIT
+          hdiutil attach "$dmg" -nobrowse -readonly -mountpoint "$mount_dir"
+          app=$(find "$mount_dir" -maxdepth 1 -name '*.app' -type d -print -quit)
+          test -n "$app"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist" | grep -Fx 'chat.schildi.revenge'
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleURLTypes:0:CFBundleURLSchemes:0' "$app/Contents/Info.plist" | grep -Fx matrix
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleURLTypes:1:CFBundleURLSchemes:0' "$app/Contents/Info.plist" | grep -Fx schildichat
+          lipo -archs "$app/Contents/app/resources/libmatrix_sdk_ffi.dylib" | grep -Fx arm64
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SchildiChatRevenge-macos-arm64
+          path: composeApp/build/compose/binaries/main-release/dmg/*.dmg
+          if-no-files-found: error
