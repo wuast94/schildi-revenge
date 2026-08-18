@@ -11,6 +11,7 @@ import co.touchlab.kermit.Tag
 import co.touchlab.kermit.platformLogWriter
 import chat.schildi.revenge.ipc.SingleInstance
 import chat.schildi.revenge.util.ExternalViewCache
+import chat.schildi.revenge.util.OperatingSystem
 import chat.schildi.revenge.util.SystemInfo
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.core.context
@@ -37,6 +38,10 @@ fun main(args: Array<String>) {
         }
     }
 
+    if (SystemInfo.getOs() == OperatingSystem.Mac) {
+        MacOpenUriHandler.install()
+    }
+
     MainCommand().main(args)
 }
 
@@ -58,12 +63,10 @@ class MainCommand : CliktCommand("schildi-revenge") {
         if (command.isEmpty()) {
             launchMainApp()
         } else {
-            var allowLaunchFromCommand = false
+            val deeplinkCommand = command.singleOrNull()?.let(::deeplinkCommandOrNull)
+            val allowLaunchFromCommand = deeplinkCommand != null
             val joinedCommand = when {
-                isSupportedDeeplink(command) -> {
-                    allowLaunchFromCommand = true
-                    "${Action.Global.ConsumeLink.name} ${command.first()}"
-                }
+                deeplinkCommand != null -> deeplinkCommand
                 else -> command.joinToString(separator = " ")
             }
             val success = SingleInstance.notifyExistingInstance(joinedCommand)
@@ -78,13 +81,6 @@ class MainCommand : CliktCommand("schildi-revenge") {
         }
     }
 
-    private fun isSupportedDeeplink(args: List<String>) = checkArguments(
-        Action.Global.ConsumeLink,
-        args = args,
-        implicitArgs = emptyList(),
-        validSessionIds = null,
-    ) == null
-
     private fun launchMainApp(
         startInTray: Boolean = this.startInTray,
         initialCommand: String? = null,
@@ -95,4 +91,14 @@ class MainCommand : CliktCommand("schildi-revenge") {
         ExternalViewCache.clearAsync(ScCoroutines.scope(Dispatchers.IO, "ExternalViewCache"))
         ComposeApp.main(startInTray, initialCommand)
     }
+}
+
+internal fun deeplinkCommandOrNull(uri: String): String? {
+    val validationError = checkArguments(
+        Action.Global.ConsumeLink,
+        args = listOf(uri),
+        implicitArgs = emptyList(),
+        validSessionIds = null,
+    )
+    return if (validationError == null) "${Action.Global.ConsumeLink.name} $uri" else null
 }

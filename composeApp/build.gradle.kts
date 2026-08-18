@@ -456,6 +456,8 @@ compose.desktop {
                         <key>CFBundleURLTypes</key>
                         <array>
                             <dict>
+                                <key>CFBundleTypeRole</key>
+                                <string>Viewer</string>
                                 <key>CFBundleURLName</key>
                                 <string>Matrix URI</string>
                                 <key>CFBundleURLSchemes</key>
@@ -464,6 +466,8 @@ compose.desktop {
                                 </array>
                             </dict>
                             <dict>
+                                <key>CFBundleTypeRole</key>
+                                <string>Viewer</string>
                                 <key>CFBundleURLName</key>
                                 <string>SchildiChat Legacy URI</string>
                                 <key>CFBundleURLSchemes</key>
