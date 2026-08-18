@@ -264,6 +264,15 @@ For Windows releases:
 ./gradlew packageReleaseMsi
 ```
 
+For macOS releases:
+
+```
+./gradlew packageReleaseDmg
+```
+
+The resulting DMG is not signed or notarized yet, so macOS Gatekeeper will require manual confirmation before the
+application can be opened.
+
 ## Running as Flatpak
 
 While there is no plan to release SchildiChat on Flathub for the moment, if you prefer to run it as a Flatpak you can use the
