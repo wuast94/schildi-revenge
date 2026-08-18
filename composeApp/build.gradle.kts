@@ -375,6 +375,13 @@ tasks.named("compileAndroidMain").configure {
 
 val calVer: String = ZonedDateTime.now(ZoneOffset.UTC)
         .format(DateTimeFormatter.ofPattern("yy.MM.dd"))
+val macosPackageVersion: String by lazy {
+    val version = providers.gradleProperty("macosPackageVersion").getOrElse(calVer)
+    if (!Regex("""^\d{2}\.\d{2}\.\d{2}$""").matches(version)) {
+        throw GradleException("macosPackageVersion must use YY.MM.DD format, got: $version")
+    }
+    version
+}
 val composePackageName = "SchildiChatRevenge"
 val linuxPackageName = "schildichat-revenge"
 val linuxXWaylandDesktopId = "chat-schildi-revenge-MainKt"
@@ -408,7 +415,11 @@ compose.desktop {
                 TargetFormat.Dmg,
             )
             packageName = nativePackageName
-            packageVersion = calVer
+            packageVersion = if (org.gradle.internal.os.OperatingSystem.current().isMacOsX) {
+                macosPackageVersion
+            } else {
+                calVer
+            }
             vendor = "SchildiChat"
             description = "SchildiChat Revenge"
 
