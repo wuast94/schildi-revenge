@@ -403,6 +403,13 @@ tasks.matching {
 
 val calVer: String = ZonedDateTime.now(ZoneOffset.UTC)
     .format(DateTimeFormatter.ofPattern("yy.MM.dd"))
+val macosPackageVersion: String by lazy {
+    val version = providers.gradleProperty("macosPackageVersion").getOrElse(calVer)
+    if (!Regex("""^\d{2}\.\d{2}\.\d{2}$""").matches(version)) {
+        throw GradleException("macosPackageVersion must use YY.MM.DD format, got: $version")
+    }
+    version
+}
 val composePackageName = "SchildiChatRevenge"
 val linuxPackageName = "schildichat-revenge"
 val linuxXWaylandDesktopId = "chat-schildi-revenge-MainKt"
@@ -417,6 +424,9 @@ compose.desktop {
         mainClass = "chat.schildi.revenge.MainKt"
         // Java4Shell (CVE-2026-114938) workaround until jetbrains JDK gets a fixed release
         jvmArgs += "-XX:-UseBASE64Intrinsics"
+        if (org.gradle.internal.os.OperatingSystem.current().isMacOsX) {
+            jvmArgs("--enable-native-access=ALL-UNNAMED")
+        }
 
         // ProGuard is broken, today can we fix?
         buildTypes {
@@ -435,7 +445,11 @@ compose.desktop {
                 TargetFormat.Dmg,
             )
             packageName = nativePackageName
-            packageVersion = calVer
+            packageVersion = if (org.gradle.internal.os.OperatingSystem.current().isMacOsX) {
+                macosPackageVersion
+            } else {
+                calVer
+            }
             vendor = "SchildiChat"
             description = "SchildiChat Revenge"
 
@@ -473,6 +487,7 @@ compose.desktop {
             }
 
             macOS {
+                bundleID = "chat.schildi.revenge"
                 appCategory = "public.app-category.social-networking"
                 minimumSystemVersion = "11.0"
                 iconFile.set(rootProject.file("graphics/ic_launcher.icns"))
