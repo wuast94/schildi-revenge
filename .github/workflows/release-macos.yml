@@ -2,15 +2,18 @@
 name: Build macOS
 
 on:
+  push:
+    tags:
+      - "v*"
   workflow_dispatch:
     inputs:
       version:
         description: macOS package version in YY.MM.DD format
-        required: true
+        required: false
         type: string
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: macos-${{ github.workflow }}-${{ github.ref }}
@@ -20,9 +23,23 @@ jobs:
   package:
     runs-on: macos-latest
     timeout-minutes: 60
-    env:
-      ORG_GRADLE_PROJECT_macosPackageVersion: ${{ inputs.version }}
     steps:
+      - name: Determine version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -n "${{ inputs.version }}" ]]; then
+            ver="${{ inputs.version }}"
+          elif [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            ver="${GITHUB_REF_NAME#v}"
+          else
+            echo "error: no version specified or inferred from tag" >&2
+            exit 1
+          fi
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+          echo "tag=v$ver" >> "$GITHUB_OUTPUT"
+          echo "ORG_GRADLE_PROJECT_macosPackageVersion=$ver" >> "$GITHUB_ENV"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: recursive
@@ -69,3 +86,32 @@ jobs:
           path: composeApp/build/compose/binaries/main-release/dmg/*.dmg
           if-no-files-found: error
           archive: false
+
+      - name: Publish GitHub Release
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          dmg=$(find composeApp/build/compose/binaries/main-release/dmg -maxdepth 1 -name '*.dmg' -print -quit)
+          test -n "$dmg"
+
+          notes_file=$(mktemp)
+          if gh release view "$TAG" --repo SchildiChat/schildi-revenge --json body -q .body > "$notes_file" 2>/dev/null && [[ -s "$notes_file" ]]; then
+            printf '\n\n### macOS installation\n\nThe DMG is currently not signed with an Apple Developer ID or notarized. macOS Gatekeeper therefore requires manual confirmation before the first launch.\n' >> "$notes_file"
+          else
+            cat << 'EOF' > "$notes_file"
+          ### macOS installation
+
+          The DMG is currently not signed with an Apple Developer ID or notarized. macOS Gatekeeper therefore requires manual confirmation before the first launch.
+          EOF
+          fi
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --notes-file "$notes_file"
+            gh release upload "$TAG" "$dmg" --clobber
+          else
+            gh release create "$TAG" "$dmg" --title "$TAG" --notes-file "$notes_file"
+          fi
+
