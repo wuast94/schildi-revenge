@@ -23,7 +23,28 @@ jobs:
   package:
     runs-on: macos-latest
     timeout-minutes: 60
+    env:
+      MACOS_TEAM_ID: P87C5CXMEY
     steps:
+      - name: Check signing secrets
+        shell: bash
+        env:
+          MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_NOTARY_KEY_P8_BASE64: ${{ secrets.MACOS_NOTARY_KEY_P8_BASE64 }}
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in MACOS_CERTIFICATE_P12_BASE64 MACOS_CERTIFICATE_PASSWORD MACOS_NOTARY_KEY_P8_BASE64 MACOS_NOTARY_KEY_ID MACOS_NOTARY_ISSUER_ID; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Missing secret $name"
+              missing=1
+            fi
+          done
+          exit "$missing"
+
       - name: Determine version
         id: version
         shell: bash
@@ -60,8 +81,80 @@ jobs:
       - name: Install just
         run: brew install just
 
+      - name: Import signing certificate
+        shell: bash
+        env:
+          MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          keychain_password=$(openssl rand -hex 24)
+          certificate="$RUNNER_TEMP/certificate.p12"
+
+          printf '%s' "$MACOS_CERTIFICATE_P12_BASE64" | base64 --decode > "$certificate"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$certificate" -k "$keychain" -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          rm -f "$certificate"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain" > /dev/null
+
+          existing_keychains=()
+          while IFS= read -r existing; do
+            existing_keychains+=("$existing")
+          done < <(security list-keychains -d user | sed -E 's/^[[:space:]]*"(.*)"$/\1/')
+          security list-keychains -d user -s "$keychain" "${existing_keychains[@]}"
+
+          identity=$(security find-identity -v -p codesigning "$keychain" | awk -F'"' '/Developer ID Application: / { print $2; exit }')
+          if [[ "$identity" != *"($MACOS_TEAM_ID)" ]]; then
+            echo "::error::No valid Developer ID Application identity of team $MACOS_TEAM_ID in the certificate secret"
+            exit 1
+          fi
+
+          mkdir -p "$HOME/.gradle"
+          {
+            echo "compose.desktop.mac.sign=true"
+            echo "compose.desktop.mac.signing.identity=${identity#Developer ID Application: }"
+            echo "compose.desktop.mac.signing.keychain=$keychain"
+          } >> "$HOME/.gradle/gradle.properties"
+          echo "MACOS_SIGNING_IDENTITY=$identity" >> "$GITHUB_ENV"
+          echo "MACOS_SIGNING_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
+
       - name: Build and verify macOS DMG
         run: just checkminversion
+
+      - name: Verify app signature
+        run: ./scripts/check-macos-signature.sh app composeApp/build/compose/binaries/main-release/app/SchildiChatRevenge.app
+
+      - name: Sign, notarize and staple DMG
+        shell: bash
+        env:
+          MACOS_NOTARY_KEY_P8_BASE64: ${{ secrets.MACOS_NOTARY_KEY_P8_BASE64 }}
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          dmg=$(find composeApp/build/compose/binaries/main-release/dmg -maxdepth 1 -name '*.dmg' -print -quit)
+          test -n "$dmg"
+          codesign --force --timestamp --sign "$MACOS_SIGNING_IDENTITY" --keychain "$MACOS_SIGNING_KEYCHAIN" "$dmg"
+
+          notary_key="$RUNNER_TEMP/notary-key.p8"
+          printf '%s' "$MACOS_NOTARY_KEY_P8_BASE64" | base64 --decode > "$notary_key"
+          notary_credentials=(--key "$notary_key" --key-id "$MACOS_NOTARY_KEY_ID" --issuer "$MACOS_NOTARY_ISSUER_ID")
+
+          submission=$(xcrun notarytool submit "$dmg" "${notary_credentials[@]}" --wait --output-format json)
+          submission_id=$(jq -r '.id' <<<"$submission")
+          submission_status=$(jq -r '.status' <<<"$submission")
+          echo "Notarization $submission_id: $submission_status"
+          xcrun notarytool log "$submission_id" "${notary_credentials[@]}" || true
+          if [[ "$submission_status" != "Accepted" ]]; then
+            echo "::error::Apple did not accept the notarization submission ($submission_status)"
+            exit 1
+          fi
+
+          xcrun stapler staple "$dmg"
+          ./scripts/check-macos-signature.sh dmg "$dmg"
 
       - name: Verify DMG contents
         shell: bash
@@ -80,6 +173,8 @@ jobs:
           /usr/libexec/PlistBuddy -c 'Print :CFBundleURLTypes:1:CFBundleURLSchemes:0' "$app/Contents/Info.plist" | grep -Fx schildichat
           /usr/libexec/PlistBuddy -c 'Print :CFBundleURLTypes:1:CFBundleTypeRole' "$app/Contents/Info.plist" | grep -Fx Viewer
           ./scripts/check-macos-dylib.sh "$app"
+          ./scripts/check-macos-signature.sh app "$app"
+          ./scripts/check-macos-signature.sh gatekeeper "$app"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -98,15 +193,7 @@ jobs:
           test -n "$dmg"
 
           notes_file=$(mktemp)
-          if gh release view "$TAG" --repo SchildiChat/schildi-revenge --json body -q .body > "$notes_file" 2>/dev/null && [[ -s "$notes_file" ]]; then
-            printf '\n\n### macOS installation\n\nThe DMG is currently not signed with an Apple Developer ID or notarized. macOS Gatekeeper therefore requires manual confirmation before the first launch.\n' >> "$notes_file"
-          else
-            cat << 'EOF' > "$notes_file"
-          ### macOS installation
-
-          The DMG is currently not signed with an Apple Developer ID or notarized. macOS Gatekeeper therefore requires manual confirmation before the first launch.
-          EOF
-          fi
+          gh release view "$TAG" --repo SchildiChat/schildi-revenge --json body -q .body > "$notes_file" 2>/dev/null || true
 
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release edit "$TAG" --notes-file "$notes_file"
@@ -115,3 +202,9 @@ jobs:
             gh release create "$TAG" "$dmg" --title "$TAG" --notes-file "$notes_file"
           fi
 
+      - name: Remove signing credentials
+        if: always()
+        shell: bash
+        run: |
+          security delete-keychain "$RUNNER_TEMP/signing.keychain-db" || true
+          rm -f "$RUNNER_TEMP/certificate.p12" "$RUNNER_TEMP/notary-key.p8" "$HOME/.gradle/gradle.properties"

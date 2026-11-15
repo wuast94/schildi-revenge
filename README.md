@@ -194,8 +194,9 @@ For macOS releases:
 ./gradlew packageReleaseDmg
 ```
 
-The resulting DMG is not signed or notarized yet, so macOS Gatekeeper will require manual confirmation before the
-application can be opened.
+A local build is not signed with a Developer ID or notarized, so macOS Gatekeeper will require manual confirmation
+before the application can be opened. The DMGs published on the releases page are signed and notarized by the
+`Build macOS` workflow.
 
 ## Running as Flatpak
 
